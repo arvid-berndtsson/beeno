@@ -1,15 +1,22 @@
-use beeno_core::engine::{execute_request, DefaultRiskPolicy, Engine, EngineError};
+use beeno_core::engine::{
+    execute_request, ContextSummarizer, DefaultRiskPolicy, Engine, EngineError,
+    RollingContextSummarizer,
+};
 use beeno_core::providers::{
     HttpProvider, MockProvider, OllamaProvider, OpenAICompatProvider, TranslatorProvider,
 };
 use beeno_core::repl::run_repl;
+use beeno_core::server::ServerManager;
 use beeno_core::types::{
-    AppConfig, DenoPermissions, ExecutionRequest, FileMetadata, JsonEnvelope, SessionSummary,
+    AppConfig, DenoPermissions, ExecutionRequest, FileMetadata, JsonEnvelope, ServerContext,
+    SessionSummary,
 };
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use toml::Value;
 
 #[derive(Debug, Parser)]
@@ -64,6 +71,14 @@ enum Commands {
         allow_env: bool,
         #[arg(long = "allow-run", default_value_t = false)]
         allow_run: bool,
+    },
+    Dev {
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+        #[arg(long, default_value_t = false)]
+        open: bool,
     },
 }
 
@@ -150,8 +165,238 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
         }
+        Commands::Dev { file, port, open } => {
+            run_dev_with_provider(&cfg, file, port, open).await?;
+        }
     }
 
+    Ok(())
+}
+
+async fn run_dev_with_provider(
+    cfg: &AppConfig,
+    file: Option<PathBuf>,
+    port: u16,
+    open: bool,
+) -> anyhow::Result<()> {
+    let provider = build_provider(cfg, |k| std::env::var(k).ok());
+    let engine = Engine::new(provider, policy_from_cfg(cfg)?);
+    let mut summarizer = RollingContextSummarizer::new(cfg.repl.summary_window);
+    let mut server_manager = ServerManager::default();
+
+    let (initial_code, mode) = match file {
+        Some(path) => {
+            let script = fs::read_to_string(&path)?;
+            if script.contains("/*nl") {
+                let (processed, warnings) = engine
+                    .process_tagged_script(
+                        &script,
+                        current_summary_with_server(&mut summarizer, &mut server_manager),
+                        Some(path.to_string_lossy().to_string()),
+                    )
+                    .await
+                    .map_err(render_engine_error)?;
+                for warning in warnings {
+                    eprintln!("warning: {warning}");
+                }
+                (processed, "file-nl".to_string())
+            } else {
+                (script, "file".to_string())
+            }
+        }
+        None => (
+            r#"const port = Number(Deno.env.get("PORT") ?? "8080");
+Deno.serve({ port }, () => new Response("Beeno dev server running"));
+console.log(`dev server listening on http://127.0.0.1:${port}`);"#
+                .to_string(),
+            "scaffold".to_string(),
+        ),
+    };
+
+    let status = server_manager
+        .start_with_code(initial_code, port, &mode)
+        .await?;
+    println!("Beeno Dev");
+    println!("server running at {}", status.url);
+    println!("type /help for dev commands");
+
+    if open {
+        open_in_browser(&status.url)?;
+    } else if prompt_confirm("open hosted webpage in your default browser?")? {
+        open_in_browser(&status.url)?;
+    }
+
+    loop {
+        print!("dev> ");
+        io::stdout().flush()?;
+        let mut line = String::new();
+        if io::stdin().read_line(&mut line)? == 0 {
+            break;
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if line == "/help" {
+            println!("Beeno Dev Commands");
+            println!("  /help                    show command list");
+            println!("  /status                  show server status");
+            println!("  /open                    open current server URL in browser");
+            println!("  /restart                 restart server with current source");
+            println!("  /hotfix-js <code>        hotfix server using JS/TS");
+            println!("  /hotfix-nl <prompt>      hotfix server using LLM translation");
+            println!("  /stop                    stop server");
+            println!("  /start                   start stopped server with last source");
+            println!("  /quit                    exit dev mode");
+            continue;
+        }
+
+        if line == "/quit" || line == "/exit" {
+            break;
+        }
+
+        if line == "/status" {
+            if let Some(s) = server_manager.status() {
+                println!("running: {} ({})", s.url, s.mode);
+            } else {
+                println!("server is stopped");
+            }
+            continue;
+        }
+
+        if line == "/open" {
+            if let Some(s) = server_manager.status() {
+                open_in_browser(&s.url)?;
+            } else {
+                println!("server is stopped");
+            }
+            continue;
+        }
+
+        if line == "/stop" {
+            server_manager.stop().await?;
+            println!("server stopped");
+            continue;
+        }
+
+        if line == "/start" {
+            let Some(source) = server_manager.last_source() else {
+                println!("no previous server source available");
+                continue;
+            };
+            let s = server_manager
+                .start_with_code(source, port, "restart")
+                .await?;
+            println!("server started: {}", s.url);
+            continue;
+        }
+
+        if line == "/restart" {
+            let Some(source) = server_manager.last_source() else {
+                println!("no previous server source available");
+                continue;
+            };
+            let s = server_manager
+                .start_with_code(source, port, "restart")
+                .await?;
+            println!("server restarted: {}", s.url);
+            continue;
+        }
+
+        if let Some(code) = line.strip_prefix("/hotfix-js") {
+            let src = code.trim();
+            if src.is_empty() {
+                println!("usage: /hotfix-js <code>");
+                continue;
+            }
+            let s = server_manager
+                .hotfix_with_code(src.to_string(), "js-hotfix")
+                .await?;
+            summarizer.update(src).await;
+            println!("hotfix applied: {}", s.url);
+            continue;
+        }
+
+        if let Some(prompt) = line.strip_prefix("/hotfix-nl") {
+            let src = prompt.trim();
+            if src.is_empty() {
+                println!("usage: /hotfix-nl <prompt>");
+                continue;
+            }
+            let summary = current_summary_with_server(&mut summarizer, &mut server_manager);
+            let (code, _, risk) = engine
+                .prepare_source(src, "force_nl", summary, None)
+                .await
+                .map_err(render_engine_error)?;
+            if risk.requires_confirmation
+                && cfg.policy.confirm_risky
+                && !prompt_confirm("risky hotfix generated, apply?")?
+            {
+                println!("hotfix skipped");
+                continue;
+            }
+            let s = server_manager.hotfix_with_code(code, "nl-hotfix").await?;
+            summarizer.update(src).await;
+            println!("hotfix applied: {}", s.url);
+            continue;
+        }
+
+        println!("unknown command: {line}. try /help");
+    }
+
+    server_manager.stop().await?;
+    Ok(())
+}
+
+fn current_summary_with_server(
+    summarizer: &mut RollingContextSummarizer,
+    server_manager: &mut ServerManager,
+) -> SessionSummary {
+    let mut summary = summarizer.current();
+    summary.server = server_manager.status().map(|status| ServerContext {
+        running: status.running,
+        url: Some(status.url),
+        port: Some(status.port),
+        mode: status.mode,
+    });
+    summary
+}
+
+fn prompt_confirm(prompt: &str) -> anyhow::Result<bool> {
+    print!("{prompt} [y/N]: ");
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "YES"))
+}
+
+fn open_in_browser(url: &str) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg(url);
+        c
+    };
+
+    #[cfg(target_os = "linux")]
+    let mut cmd = {
+        let mut c = Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "start", url]);
+        c
+    };
+
+    let status = cmd.status()?;
+    if !status.success() {
+        anyhow::bail!("failed to open browser automatically; open manually: {url}");
+    }
     Ok(())
 }
 

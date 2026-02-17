@@ -7,6 +7,7 @@ LLM-assisted pseudocode support for `repl`, `eval`, and `run`.
 
 - `beeno init-config [--force]`
 - `beeno repl [--provider <id>] [--model <name>] [--policy <path>] [--json]`
+- `beeno dev [--file <path>] [--port 8080] [--open]`
 - `beeno eval "<input>" [--json]`
 - `beeno run <file> [--json]`
 
@@ -43,3 +44,5 @@ Use `llm.endpoint` (or env var referenced by `llm.endpoint_env_var`) to override
   - `/serve-hotfix-js <code>` / `/serve-hotfix-nl <pseudocode>`
   - `/serve-status`, `/serve-stop`, `/serve-port <port>`
   - prompts to open the hosted page in your default browser
+- `beeno dev` starts a dedicated long-running dev server shell with hotfix commands:
+  - `/status`, `/open`, `/restart`, `/hotfix-js`, `/hotfix-nl`, `/stop`, `/start`, `/quit`
