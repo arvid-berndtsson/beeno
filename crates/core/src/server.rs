@@ -4,6 +4,7 @@ use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::{Child, Command};
 
+/// Observable runtime status for the background dev server process.
 #[derive(Debug, Clone)]
 pub struct ServerStatus {
     pub running: bool,
@@ -12,6 +13,7 @@ pub struct ServerStatus {
     pub mode: String,
 }
 
+/// Background Deno server lifecycle manager used by REPL and `beeno dev`.
 pub struct ServerManager {
     child: Option<Child>,
     source_path: Option<PathBuf>,
@@ -33,6 +35,7 @@ impl Default for ServerManager {
 }
 
 impl ServerManager {
+    /// Starts (or restarts) the managed server process with provided source code.
     pub async fn start_with_code(
         &mut self,
         code: String,
@@ -71,6 +74,7 @@ impl ServerManager {
         }))
     }
 
+    /// Applies a server hotfix by restarting with updated source on current port.
     pub async fn hotfix_with_code(
         &mut self,
         code: String,
@@ -80,6 +84,7 @@ impl ServerManager {
         self.start_with_code(code, port, mode).await
     }
 
+    /// Stops the managed server process if it is currently running.
     pub async fn stop(&mut self) -> anyhow::Result<()> {
         if let Some(child) = &mut self.child {
             let _ = child.start_kill();
@@ -89,6 +94,7 @@ impl ServerManager {
         Ok(())
     }
 
+    /// Returns current server status, or `None` if stopped/exited.
     pub fn status(&mut self) -> Option<ServerStatus> {
         let child = self.child.as_mut()?;
         if let Ok(Some(_status)) = child.try_wait() {
@@ -105,6 +111,7 @@ impl ServerManager {
         })
     }
 
+    /// Returns the last source code used to start the server.
     pub fn last_source(&self) -> Option<String> {
         self.source_code.clone()
     }

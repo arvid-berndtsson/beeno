@@ -4,10 +4,21 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+description = "CLI for running pseudocode and JS/TS through a Deno-backed runtime."
+repository = "https://github.com/arvid/beeno"
+readme = "../../README.md"
+keywords = ["cli", "deno", "llm", "pseudocode"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "beeno"
 path = "src/main.rs"
+
+[features]
+default = ["provider-http", "provider-openai-compat", "provider-ollama"]
+provider-http = ["beeno_core/provider-http"]
+provider-openai-compat = ["beeno_core/provider-openai-compat"]
+provider-ollama = ["beeno_core/provider-ollama"]
 
 [dependencies]
 anyhow.workspace = true
@@ -15,4 +26,4 @@ clap.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 toml.workspace = true
-beeno_core = { path = "../core" }
+beeno_core = { path = "../core", version = "0.1.0", default-features = false }

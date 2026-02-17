@@ -2,9 +2,13 @@ use beeno_core::engine::{
     execute_request, ContextSummarizer, DefaultRiskPolicy, Engine, EngineError,
     RollingContextSummarizer,
 };
-use beeno_core::providers::{
-    HttpProvider, MockProvider, OllamaProvider, OpenAICompatProvider, TranslatorProvider,
-};
+#[cfg(feature = "provider-http")]
+use beeno_core::providers::HttpProvider;
+#[cfg(feature = "provider-ollama")]
+use beeno_core::providers::OllamaProvider;
+#[cfg(feature = "provider-openai-compat")]
+use beeno_core::providers::OpenAICompatProvider;
+use beeno_core::providers::{MockProvider, TranslatorProvider};
 use beeno_core::repl::run_repl;
 use beeno_core::server::ServerManager;
 use beeno_core::types::{
@@ -204,13 +208,7 @@ async fn run_dev_with_provider(
                 (script, "file".to_string())
             }
         }
-        None => (
-            r#"const port = Number(Deno.env.get("PORT") ?? "8080");
-Deno.serve({ port }, () => new Response("Beeno dev server running"));
-console.log(`dev server listening on http://127.0.0.1:${port}`);"#
-                .to_string(),
-            "scaffold".to_string(),
-        ),
+        None => (default_dev_server_source(), "scaffold".to_string()),
     };
 
     let status = server_manager
@@ -239,16 +237,7 @@ console.log(`dev server listening on http://127.0.0.1:${port}`);"#
         }
 
         if line == "/help" {
-            println!("Beeno Dev Commands");
-            println!("  /help                    show command list");
-            println!("  /status                  show server status");
-            println!("  /open                    open current server URL in browser");
-            println!("  /restart                 restart server with current source");
-            println!("  /hotfix-js <code>        hotfix server using JS/TS");
-            println!("  /hotfix-nl <prompt>      hotfix server using LLM translation");
-            println!("  /stop                    stop server");
-            println!("  /start                   start stopped server with last source");
-            println!("  /quit                    exit dev mode");
+            print_dev_help();
             continue;
         }
 
@@ -347,6 +336,26 @@ console.log(`dev server listening on http://127.0.0.1:${port}`);"#
 
     server_manager.stop().await?;
     Ok(())
+}
+
+fn default_dev_server_source() -> String {
+    r#"const port = Number(Deno.env.get("PORT") ?? "8080");
+Deno.serve({ port }, () => new Response("Beeno dev server running"));
+console.log(`dev server listening on http://127.0.0.1:${port}`);"#
+        .to_string()
+}
+
+fn print_dev_help() {
+    println!("Beeno Dev Commands");
+    println!("  /help                    show command list");
+    println!("  /status                  show server status");
+    println!("  /open                    open current server URL in browser");
+    println!("  /restart                 restart server with current source");
+    println!("  /hotfix-js <code>        hotfix server using JS/TS");
+    println!("  /hotfix-nl <prompt>      hotfix server using LLM translation");
+    println!("  /stop                    stop server");
+    println!("  /start                   start stopped server with last source");
+    println!("  /quit                    exit dev mode");
 }
 
 fn current_summary_with_server(
@@ -514,12 +523,14 @@ where
 
     match provider.as_str() {
         "mock" => Box::new(MockProvider),
+        #[cfg(feature = "provider-ollama")]
         "ollama" => Box::new(OllamaProvider::new(
             endpoint.unwrap_or_else(|| "http://127.0.0.1:11434/api/generate".to_string()),
             cfg.llm.model.clone(),
             cfg.llm.temperature,
             cfg.llm.max_tokens,
         )),
+        #[cfg(feature = "provider-openai-compat")]
         "chatgpt" => Box::new(OpenAICompatProvider::new(
             endpoint.unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string()),
             api_key,
@@ -527,6 +538,7 @@ where
             cfg.llm.temperature,
             cfg.llm.max_tokens,
         )),
+        #[cfg(feature = "provider-openai-compat")]
         "openrouter" => Box::new(OpenAICompatProvider::new(
             endpoint.unwrap_or_else(|| "https://openrouter.ai/api/v1/chat/completions".to_string()),
             api_key,
@@ -534,6 +546,7 @@ where
             cfg.llm.temperature,
             cfg.llm.max_tokens,
         )),
+        #[cfg(feature = "provider-openai-compat")]
         "openai_compat" => Box::new(OpenAICompatProvider::new(
             endpoint.unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string()),
             api_key,
@@ -541,6 +554,7 @@ where
             cfg.llm.temperature,
             cfg.llm.max_tokens,
         )),
+        #[cfg(feature = "provider-http")]
         _ => Box::new(HttpProvider::new(
             endpoint.unwrap_or_else(|| "http://localhost:8080/translate".to_string()),
             api_key,
@@ -548,6 +562,8 @@ where
             cfg.llm.temperature,
             cfg.llm.max_tokens,
         )),
+        #[cfg(not(feature = "provider-http"))]
+        _ => Box::new(MockProvider),
     }
 }
 
@@ -779,6 +795,7 @@ fn render_engine_error(err: EngineError) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
     use std::collections::HashMap;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -876,5 +893,29 @@ mod tests {
         cfg.policy.policy_path = Some("".to_string());
         let result = policy_from_cfg(&cfg);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn dev_command_parses_flags() {
+        let cli = Cli::try_parse_from([
+            "beeno", "dev", "--file", "app.ts", "--port", "3333", "--open",
+        ])
+        .expect("cli parse");
+
+        match cli.cmd {
+            Commands::Dev { file, port, open } => {
+                assert_eq!(file, Some(PathBuf::from("app.ts")));
+                assert_eq!(port, 3333);
+                assert!(open);
+            }
+            _ => panic!("expected dev command"),
+        }
+    }
+
+    #[test]
+    fn default_dev_source_contains_deno_serve() {
+        let src = default_dev_server_source();
+        assert!(src.contains("Deno.serve"));
+        assert!(src.contains("PORT"));
     }
 }

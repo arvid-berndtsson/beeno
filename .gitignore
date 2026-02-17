@@ -1,0 +1,14 @@
+# Rust build artifacts
+target/
+
+# Beeno runtime/artifact outputs
+.beeno/
+
+# Editor/OS noise
+.DS_Store
+*.swp
+*.swo
+
+# Python cache artifacts (for repo scripts/workflows)
+__pycache__/
+*.py[cod]

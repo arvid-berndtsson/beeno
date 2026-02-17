@@ -1,11 +1,17 @@
 use crate::types::{TranslateRequest, TranslateResult};
 use async_trait::async_trait;
+#[cfg(any(
+    feature = "provider-http",
+    feature = "provider-openai-compat",
+    feature = "provider-ollama"
+))]
 use reqwest::{Client, RequestBuilder};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
+/// Errors returned by provider adapters.
 #[derive(Debug, Error)]
 pub enum ProviderError {
     #[error("provider request failed: {0}")]
@@ -14,8 +20,10 @@ pub enum ProviderError {
     InvalidResponse(String),
 }
 
+/// Provider abstraction that translates NL/pseudocode into executable code.
 #[async_trait]
 pub trait TranslatorProvider: Send + Sync {
+    /// Translates a request into JS/TS source.
     async fn translate(&self, req: TranslateRequest) -> Result<TranslateResult, ProviderError>;
 }
 
@@ -29,6 +37,9 @@ where
     }
 }
 
+/// Generic JSON HTTP provider using Beeno's legacy `{ code: ... }` contract.
+#[cfg(feature = "provider-http")]
+#[cfg_attr(docsrs, doc(cfg(feature = "provider-http")))]
 #[derive(Debug, Clone)]
 pub struct HttpProvider {
     pub endpoint: String,
@@ -39,7 +50,9 @@ pub struct HttpProvider {
     client: Client,
 }
 
+#[cfg(feature = "provider-http")]
 impl HttpProvider {
+    /// Creates a new legacy HTTP provider client.
     pub fn new(
         endpoint: String,
         api_key: Option<String>,
@@ -58,6 +71,7 @@ impl HttpProvider {
     }
 }
 
+#[cfg(feature = "provider-http")]
 #[derive(Debug, Serialize)]
 struct LegacyRequestBody {
     model: String,
@@ -67,6 +81,7 @@ struct LegacyRequestBody {
     metadata: Value,
 }
 
+#[cfg(feature = "provider-http")]
 #[async_trait]
 impl TranslatorProvider for HttpProvider {
     async fn translate(&self, req: TranslateRequest) -> Result<TranslateResult, ProviderError> {
@@ -119,6 +134,9 @@ impl TranslatorProvider for HttpProvider {
     }
 }
 
+/// OpenAI-compatible chat completions provider.
+#[cfg(feature = "provider-openai-compat")]
+#[cfg_attr(docsrs, doc(cfg(feature = "provider-openai-compat")))]
 #[derive(Debug, Clone)]
 pub struct OpenAICompatProvider {
     pub endpoint: String,
@@ -129,7 +147,9 @@ pub struct OpenAICompatProvider {
     client: Client,
 }
 
+#[cfg(feature = "provider-openai-compat")]
 impl OpenAICompatProvider {
+    /// Creates a new OpenAI-compatible provider client.
     pub fn new(
         endpoint: String,
         api_key: Option<String>,
@@ -148,12 +168,14 @@ impl OpenAICompatProvider {
     }
 }
 
+#[cfg(feature = "provider-openai-compat")]
 #[derive(Debug, Serialize)]
 struct OpenAICompatMessage {
     role: String,
     content: String,
 }
 
+#[cfg(feature = "provider-openai-compat")]
 #[derive(Debug, Serialize)]
 struct OpenAICompatRequest {
     model: String,
@@ -162,6 +184,7 @@ struct OpenAICompatRequest {
     max_tokens: u32,
 }
 
+#[cfg(feature = "provider-openai-compat")]
 #[async_trait]
 impl TranslatorProvider for OpenAICompatProvider {
     async fn translate(&self, req: TranslateRequest) -> Result<TranslateResult, ProviderError> {
@@ -217,6 +240,9 @@ impl TranslatorProvider for OpenAICompatProvider {
     }
 }
 
+/// Local Ollama provider using `/api/generate`.
+#[cfg(feature = "provider-ollama")]
+#[cfg_attr(docsrs, doc(cfg(feature = "provider-ollama")))]
 #[derive(Debug, Clone)]
 pub struct OllamaProvider {
     pub endpoint: String,
@@ -226,7 +252,9 @@ pub struct OllamaProvider {
     client: Client,
 }
 
+#[cfg(feature = "provider-ollama")]
 impl OllamaProvider {
+    /// Creates a new Ollama provider client.
     pub fn new(endpoint: String, model: String, temperature: f32, max_tokens: u32) -> Self {
         Self {
             endpoint,
@@ -238,6 +266,7 @@ impl OllamaProvider {
     }
 }
 
+#[cfg(feature = "provider-ollama")]
 #[derive(Debug, Serialize)]
 struct OllamaRequest {
     model: String,
@@ -246,6 +275,7 @@ struct OllamaRequest {
     options: Value,
 }
 
+#[cfg(feature = "provider-ollama")]
 #[async_trait]
 impl TranslatorProvider for OllamaProvider {
     async fn translate(&self, req: TranslateRequest) -> Result<TranslateResult, ProviderError> {
@@ -288,6 +318,7 @@ impl TranslatorProvider for OllamaProvider {
     }
 }
 
+/// Deterministic provider used for local testing and smoke flows.
 #[derive(Debug, Clone)]
 pub struct MockProvider;
 
@@ -307,6 +338,11 @@ impl TranslatorProvider for MockProvider {
     }
 }
 
+#[cfg(any(
+    feature = "provider-http",
+    feature = "provider-openai-compat",
+    feature = "provider-ollama"
+))]
 async fn send_json(request: RequestBuilder) -> Result<Value, ProviderError> {
     let response = request
         .send()

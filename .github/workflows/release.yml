@@ -1,0 +1,235 @@
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      publish_crates:
+        description: "Publish crates.io packages"
+        type: boolean
+        required: false
+        default: false
+      release_version:
+        description: "Version to apply (e.g. v0.2.0) when running manually"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  license_and_publish_crates:
+    name: license-check-and-publish
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SHOULD_PUBLISH: ${{ github.event_name == 'release' || inputs.publish_crates == true }}
+      RELEASE_VERSION: ${{ github.event_name == 'release' && github.ref_name || inputs.release_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Sync Cargo versions from tag
+        if: env.RELEASE_VERSION != ''
+        run: |
+          python .github/scripts/sync_version_from_tag.py --version "${{ env.RELEASE_VERSION }}" --repo-root .
+          cargo generate-lockfile
+
+      - name: Install helper tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: Enforce dependency license policy
+        run: cargo deny check licenses --config deny.toml
+
+      - name: Authenticate to crates.io (Trusted Publishing)
+        if: env.SHOULD_PUBLISH == 'true'
+        id: crates_auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish beeno_core
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates_auth.outputs.token }}
+        run: cargo publish --locked --allow-dirty -p beeno_core
+
+      - name: Wait for beeno_core index propagation
+        if: env.SHOULD_PUBLISH == 'true'
+        run: |
+          VERSION="$(cargo pkgid -p beeno_core | sed 's/.*@//')"
+          echo "Waiting for crates.io to expose beeno_core ${VERSION}"
+
+          for attempt in $(seq 1 30); do
+            response=$(curl -fsSL https://crates.io/api/v1/crates/beeno_core || true)
+            newest_version=$(echo "$response" | jq -r '.crate.newest_version // empty')
+
+            if [ "$newest_version" = "$VERSION" ]; then
+              echo "beeno_core ${VERSION} is available on crates.io"
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}/30: newest_version=${newest_version:-missing}; sleeping 10s"
+            sleep 10
+          done
+
+          echo "Timed out waiting for beeno_core ${VERSION} to propagate"
+          exit 1
+
+      - name: Publish beeno
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates_auth.outputs.token }}
+        run: cargo publish --locked --allow-dirty -p beeno
+
+  build_release_assets:
+    name: build-${{ matrix.target }}
+    needs: license_and_publish_crates
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ github.event_name == 'release' && github.ref_name || inputs.release_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+            artifact_name: beeno
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
+            artifact_name: beeno
+          - os: macos-14
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+            artifact_name: beeno
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+            artifact_name: beeno
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+            artifact_name: beeno.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Sync Cargo versions from tag
+        if: env.RELEASE_VERSION != ''
+        shell: bash
+        run: |
+          python .github/scripts/sync_version_from_tag.py --version "${{ env.RELEASE_VERSION }}" --repo-root .
+          cargo generate-lockfile
+
+      - name: Install Linux aarch64 linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --locked --target ${{ matrix.target }} -p beeno
+
+      - name: Package release archive
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            VERSION="$(cargo pkgid -p beeno | sed 's/.*@//')"
+          fi
+
+          ARCHIVE="beeno-v${VERSION}-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          BIN_PATH="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+
+          mkdir -p dist
+          cp "$BIN_PATH" "dist/${{ matrix.artifact_name }}"
+          cp README.md dist/README.md
+
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            (cd dist && 7z a "../${ARCHIVE}" "${{ matrix.artifact_name }}" README.md)
+          else
+            tar -C dist -czf "${ARCHIVE}" "${{ matrix.artifact_name }}" README.md
+          fi
+
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+  assemble_and_upload_release_assets:
+    name: assemble-release-assets
+    needs: build_release_assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Stage release files
+        run: |
+          mkdir -p release
+          find dist -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release/ \;
+          ls -la release
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum *.tar.gz *.zip > SHA256SUMS.txt
+
+      - name: Upload checksums as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: release/SHA256SUMS.txt
+
+      - name: Upload assets to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.tar.gz
+            release/*.zip
+            release/SHA256SUMS.txt

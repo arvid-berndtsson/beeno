@@ -4,6 +4,22 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+description = "Core engine and provider runtime for the beeno CLI."
+repository = "https://github.com/arvid/beeno"
+documentation = "https://docs.rs/beeno_core"
+readme = "../../README.md"
+keywords = ["beeno", "llm", "deno", "pseudocode"]
+categories = ["command-line-utilities", "development-tools"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["provider-http", "provider-openai-compat", "provider-ollama"]
+provider-http = []
+provider-openai-compat = []
+provider-ollama = []
 
 [dependencies]
 anyhow.workspace = true

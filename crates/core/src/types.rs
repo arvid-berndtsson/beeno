@@ -2,12 +2,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// Optional metadata about the source being translated.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata {
     pub path: Option<String>,
     pub language_hint: Option<String>,
 }
 
+/// Input payload passed to an LLM/provider for translation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslateRequest {
     pub input: String,
@@ -16,6 +18,7 @@ pub struct TranslateRequest {
     pub file_metadata: Option<FileMetadata>,
 }
 
+/// Normalized translation output returned by provider adapters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslateResult {
     pub code: String,
@@ -25,6 +28,7 @@ pub struct TranslateResult {
     pub raw_provider_meta: BTreeMap<String, Value>,
 }
 
+/// Safety classification for generated/executed source.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
 pub enum RiskLevel {
     Safe,
@@ -32,6 +36,7 @@ pub enum RiskLevel {
     Blocked,
 }
 
+/// Result produced by policy analysis before execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskReport {
     pub level: RiskLevel,
@@ -39,6 +44,7 @@ pub struct RiskReport {
     pub requires_confirmation: bool,
 }
 
+/// Execution request sent to the runtime backend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionRequest {
     pub source: String,
@@ -46,6 +52,7 @@ pub struct ExecutionRequest {
     pub origin: String,
 }
 
+/// Coarse Deno permission model exposed by Beeno commands.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DenoPermissions {
     pub allow_read: Vec<String>,
@@ -55,6 +62,7 @@ pub struct DenoPermissions {
     pub allow_run: bool,
 }
 
+/// Rolling context sent to providers during interactive sessions.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionSummary {
     pub symbols: Vec<String>,
@@ -64,6 +72,7 @@ pub struct SessionSummary {
     pub server: Option<ServerContext>,
 }
 
+/// Runtime web-server context attached to session summaries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerContext {
     pub running: bool,
@@ -72,6 +81,7 @@ pub struct ServerContext {
     pub mode: String,
 }
 
+/// Standard JSON envelope used by machine-readable CLI output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonEnvelope {
     pub status: String,
@@ -80,6 +90,7 @@ pub struct JsonEnvelope {
     pub details: Value,
 }
 
+/// REPL-related configuration values.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplConfig {
     pub summary_window: usize,
@@ -91,6 +102,7 @@ impl Default for ReplConfig {
     }
 }
 
+/// Timeout settings used by network/provider operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeoutConfig {
     pub translate_ms: u64,
@@ -104,6 +116,7 @@ impl Default for TimeoutConfig {
     }
 }
 
+/// Model/provider settings used by translation flows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
@@ -130,6 +143,7 @@ impl Default for LlmConfig {
     }
 }
 
+/// Policy configuration controlling pre-execution checks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PolicySettings {
@@ -146,6 +160,7 @@ impl Default for PolicySettings {
     }
 }
 
+/// Self-heal behavior toggles and retry controls.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SelfHealConfig {
@@ -166,6 +181,7 @@ impl Default for SelfHealConfig {
     }
 }
 
+/// Artifact output and retention settings for diagnostics/suggestions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ArtifactConfig {
@@ -182,6 +198,7 @@ impl Default for ArtifactConfig {
     }
 }
 
+/// Hard limits for auto-generated edits during self-heal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LimitsConfig {
@@ -198,6 +215,7 @@ impl Default for LimitsConfig {
     }
 }
 
+/// File pattern denylist for mutation flows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProtectConfig {
@@ -220,6 +238,7 @@ impl Default for ProtectConfig {
     }
 }
 
+/// Top-level Beeno configuration loaded from defaults/files/env/CLI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {

@@ -13,12 +13,23 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::process::Command;
 
+/// Heuristic classification of user input before translation/execution.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum InputKind {
     Code,
     Pseudocode,
 }
 
+/// Classifies text as probable JS/TS code or pseudocode.
+///
+/// # Examples
+///
+/// ```
+/// use beeno_core::engine::{classify_input, InputKind};
+///
+/// assert_eq!(classify_input("let x = 1;"), InputKind::Code);
+/// assert_eq!(classify_input("create a map and print all keys."), InputKind::Pseudocode);
+/// ```
 pub fn classify_input(input: &str) -> InputKind {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -53,11 +64,14 @@ pub fn classify_input(input: &str) -> InputKind {
     }
 }
 
+/// Policy interface used to validate generated source.
 #[async_trait]
 pub trait RiskPolicy: Send + Sync {
+    /// Analyzes source and returns a risk report for execution gating.
     async fn analyze(&self, source: &str) -> RiskReport;
 }
 
+/// Configurable string-pattern policy inputs.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PolicyConfig {
     pub blocked_patterns: Vec<String>,
@@ -65,6 +79,7 @@ pub struct PolicyConfig {
     pub trusted_import_prefixes: Vec<String>,
 }
 
+/// Default built-in policy implementation used by Beeno.
 #[derive(Debug, Clone)]
 pub struct DefaultRiskPolicy {
     cfg: PolicyConfig,
@@ -93,6 +108,7 @@ impl Default for DefaultRiskPolicy {
 }
 
 impl DefaultRiskPolicy {
+    /// Loads policy settings from TOML or JSON file.
     pub fn from_path(path: &Path) -> anyhow::Result<Self> {
         let content = fs::read_to_string(path)?;
         let cfg = if path
@@ -159,12 +175,16 @@ impl RiskPolicy for DefaultRiskPolicy {
     }
 }
 
+/// Interface used to maintain rolling session context for LLM prompts.
 #[async_trait]
 pub trait ContextSummarizer: Send + Sync {
+    /// Consumes an event and returns the updated summary snapshot.
     async fn update(&mut self, event: &str) -> SessionSummary;
+    /// Returns the current summary snapshot.
     fn current(&self) -> SessionSummary;
 }
 
+/// Fixed-size rolling summary implementation for REPL-like workflows.
 #[derive(Debug, Clone)]
 pub struct RollingContextSummarizer {
     max: usize,
@@ -172,6 +192,7 @@ pub struct RollingContextSummarizer {
 }
 
 impl RollingContextSummarizer {
+    /// Creates a summarizer with a maximum retained item count per bucket.
     pub fn new(max: usize) -> Self {
         Self {
             max,
@@ -221,6 +242,7 @@ impl ContextSummarizer for RollingContextSummarizer {
     }
 }
 
+/// Errors emitted by translation, policy, and runtime execution flows.
 #[derive(Debug, Error)]
 pub enum EngineError {
     #[error("provider failure: {0}")]
@@ -233,6 +255,10 @@ pub enum EngineError {
     Io(#[from] std::io::Error),
 }
 
+/// Main orchestration entry for classify/translate/validate flows.
+///
+/// This type coordinates [`TranslatorProvider`] and [`RiskPolicy`] to
+/// convert input into executable source.
 pub struct Engine<P, R>
 where
     P: TranslatorProvider,
@@ -247,10 +273,30 @@ where
     P: TranslatorProvider,
     R: RiskPolicy,
 {
+    /// Constructs a new engine with a provider and policy implementation.
     pub fn new(provider: P, policy: R) -> Self {
         Self { provider, policy }
     }
 
+    /// Prepares executable source from raw input and returns risk metadata.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use beeno_core::engine::{DefaultRiskPolicy, Engine};
+    /// use beeno_core::providers::MockProvider;
+    /// use beeno_core::types::SessionSummary;
+    ///
+    /// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
+    /// let engine = Engine::new(MockProvider, DefaultRiskPolicy::default());
+    /// let (source, _, risk) = engine
+    ///     .prepare_source("print hello", "eval", SessionSummary::default(), None)
+    ///     .await?;
+    /// assert!(source.contains("console.log"));
+    /// assert!(!risk.requires_confirmation);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn prepare_source(
         &self,
         input: &str,
@@ -280,6 +326,7 @@ where
         Ok((source, translated, risk))
     }
 
+    /// Replaces tagged NL blocks in script content with translated JS/TS.
     pub async fn process_tagged_script(
         &self,
         script: &str,
@@ -337,6 +384,7 @@ fn strip_fenced_nl(body: &str) -> String {
     }
 }
 
+/// Validates permissions and executes source using the runtime backend.
 pub async fn execute_request(req: ExecutionRequest) -> Result<(), EngineError> {
     enforce_permission_alignment(&req.source, &req.deno_permissions)?;
     execute_with_deno_binary(req).await
@@ -380,6 +428,16 @@ fn enforce_permission_alignment(
     Ok(())
 }
 
+/// Parses source as TypeScript/JavaScript to ensure syntactic validity.
+///
+/// # Examples
+///
+/// ```
+/// use beeno_core::engine::parse_js;
+///
+/// assert!(parse_js("const x: number = 1;").is_ok());
+/// assert!(parse_js("const =").is_err());
+/// ```
 pub fn parse_js(source: &str) -> anyhow::Result<()> {
     let text = SourceTextInfo::from_string(source.to_string());
     parse_module(ParseParams {
