@@ -61,6 +61,15 @@ pub struct SessionSummary {
     pub imports: Vec<String>,
     pub side_effects: Vec<String>,
     pub recent_intents: Vec<String>,
+    pub server: Option<ServerContext>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerContext {
+    pub running: bool,
+    pub url: Option<String>,
+    pub port: Option<u16>,
+    pub mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

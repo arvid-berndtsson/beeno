@@ -3,7 +3,7 @@
 ## Workspace
 
 - `crates/cli`: CLI, config loading, command orchestration
-- `crates/core`: engine, repl, providers, and shared types
+- `crates/core`: engine, repl, providers, server daemon management, and shared types
 
 ## Runtime Flow
 

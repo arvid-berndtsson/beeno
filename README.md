@@ -38,3 +38,8 @@ Use `llm.endpoint` (or env var referenced by `llm.endpoint_env_var`) to override
 - Native JS/TS is classified and executed without translation when possible.
 - Pseudocode is translated through a provider adapter before AST policy checks.
 - Tagged script blocks (`/*nl ... */`) are translated and inlined.
+- REPL supports background server workflow:
+  - `/serve-js <code>` / `/serve-nl <pseudocode>`
+  - `/serve-hotfix-js <code>` / `/serve-hotfix-nl <pseudocode>`
+  - `/serve-status`, `/serve-stop`, `/serve-port <port>`
+  - prompts to open the hosted page in your default browser
