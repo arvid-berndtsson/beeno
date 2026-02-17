@@ -59,6 +59,109 @@
   - apply flow with retries
   - disabling self-heal for a run
 
+## P1 - Provider Reliability
+
+- [ ] Add integration tests for provider implementations:
+  - Ollama request/response handling
+  - OpenAI-compatible (ChatGPT/OpenRouter/custom URL) parsing
+  - Legacy HTTP provider parsing
+- [ ] Add provider failure-mode tests:
+  - auth errors
+  - rate limits
+  - malformed responses
+  - timeout handling
+
+## P1 - Provider Config Hardening
+
+- [ ] Validate provider names early with clear CLI/config errors.
+- [ ] Validate endpoint format and report actionable errors.
+- [ ] Improve missing API key diagnostics per provider type.
+
+## P1 - Secret Safety
+
+- [ ] Ensure API keys/auth headers are never persisted in artifacts or logs.
+- [ ] Add redaction for sensitive env-derived values in debug output.
+- [ ] Add tests for redaction behavior.
+
+## P1 - Self-Heal + Provider Integration
+
+- [ ] Add tests that self-heal uses configured provider selection correctly.
+- [ ] Add coverage for `.beeno.toml` + env precedence across provider switching.
+- [ ] Verify Ollama/local defaults behave correctly in self-heal mode.
+
+## P2 - Provider Docs and Ops
+
+- [ ] Add provider-specific `.beeno.toml` examples for:
+  - Ollama
+  - ChatGPT
+  - OpenRouter
+  - generic OpenAI-compatible URL
+- [ ] Add CI workflow to run fmt + tests in network-enabled environment.
+
+## P1 - Release and Compatibility
+
+- [ ] Pin and document minimum supported Deno version.
+- [ ] Add compatibility tests across a small Deno version matrix.
+- [ ] Document behavior differences across supported Deno versions (if any).
+
+## P1 - Performance and Cost Controls
+
+- [ ] Add provider-specific timeout/retry/backoff policies.
+- [ ] Add optional caching/de-duplication for repeated translation prompts.
+- [ ] Add tests for timeout/retry behavior and cache hits/misses.
+
+## P1 - Additional Self-Heal Guardrails
+
+- [ ] Add editable file-extension allowlist for auto-fix apply mode.
+- [ ] Add max runtime budget per self-heal session.
+- [ ] Add tests for allowlist and runtime-budget enforcement.
+
+## P2 - Observability
+
+- [ ] Add structured phase events (`classify`, `translate`, `run`, `heal-plan`, `heal-apply`).
+- [ ] Add metrics counters for:
+  - heal attempts
+  - successful heals
+  - blocked fixes
+  - provider failures
+- [ ] Expose observability output in JSON mode.
+
+## P2 - Quality Gates
+
+- [ ] Add `clippy` to CI.
+- [ ] Add docs checks (README/config examples validity where possible).
+- [ ] Add PR checklist for config/schema changes and migration notes.
+
+## P1 - Security Hardening
+
+- [ ] Add prompt-injection defenses for self-heal and translation prompts.
+- [ ] Harden path normalization and symlink handling to prevent escape from project root.
+- [ ] Add tests for path traversal and symlink escape scenarios.
+
+## P1 - Data Governance
+
+- [ ] Add configurable artifact redaction policy.
+- [ ] Add option to disable artifact persistence for sensitive repositories.
+- [ ] Add tests ensuring sensitive data is not persisted when redaction/disable flags are enabled.
+
+## P1 - UX Resilience
+
+- [ ] Define and enforce non-interactive/CI-safe behavior.
+- [ ] Standardize exit-code contract across run/heal outcomes.
+- [ ] Add integration tests asserting exit codes for success, dry-run suggested fixes, blocked fixes, and hard failures.
+
+## P2 - Migration and Versioning
+
+- [ ] Add config schema version field to `.beeno.toml`.
+- [ ] Add schema migration handling for future config changes.
+- [ ] Document migration policy in docs.
+
+## P2 - Packaging and Distribution
+
+- [ ] Define installation/distribution path (Homebrew/tap or install script).
+- [ ] Publish signed release artifacts with checksums.
+- [ ] Add release checklist documentation.
+
 ## Issue Drafts (for GitHub)
 
 - [ ] `feat(self-heal): auto-trigger dry-run suggestions on run failure`
