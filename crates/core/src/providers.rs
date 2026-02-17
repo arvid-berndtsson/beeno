@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn strips_markdown_fence() {
-        let src = "```ts\\nconsole.log('x');\\n```";
+        let src = "```ts\nconsole.log('x');\n```";
         assert_eq!(strip_code_fences(src), "console.log('x');");
     }
 }

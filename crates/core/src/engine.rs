@@ -4,14 +4,16 @@ use crate::types::{
     TranslateResult,
 };
 use async_trait::async_trait;
-use deno_ast::{parse_module, MediaType, ParseParams, SourceTextInfo};
+use deno_ast::{parse_module, MediaType, ParseParams};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::fs;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::process::Command;
+use url::Url;
 
 /// Heuristic classification of user input before translation/execution.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -439,10 +441,9 @@ fn enforce_permission_alignment(
 /// assert!(parse_js("const =").is_err());
 /// ```
 pub fn parse_js(source: &str) -> anyhow::Result<()> {
-    let text = SourceTextInfo::from_string(source.to_string());
     parse_module(ParseParams {
-        specifier: "file:///inline.ts".to_string(),
-        text,
+        specifier: Url::parse("file:///inline.ts")?,
+        text: Arc::<str>::from(source),
         media_type: MediaType::TypeScript,
         capture_tokens: false,
         maybe_syntax: None,

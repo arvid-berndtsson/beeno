@@ -320,7 +320,8 @@ async fn handle_input<P: TranslatorProvider>(
 
     if risk.requires_confirmation
         && confirm_risky
-        && !prompt_confirm("risky output detected, execute?")?
+        && !prompt_confirm("risky output detected, execute?")
+            .map_err(|e| EngineError::Execution(e.to_string()))?
     {
         println!("execution skipped by user");
         return Ok(());
